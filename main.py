@@ -1,4 +1,5 @@
 from anakin import search_jobs
+from candidate_profile import CANDIDATE_PROFILE
 from matcher import calculate_match
 
 def main():
@@ -6,7 +7,7 @@ def main():
     print("          JARVIS CAREER AGENT")
     print("="*60)
 
-    query = input("What type of job are you looking for?")
+    query = input("What type of job are you looking for? ")
     location = input("Location: ")
 
     try:
@@ -19,15 +20,12 @@ def main():
             print("[JARVIS] No jobs found.")
             return
         
-        print(f"[JARVIS] found {len(jobs)} jobs.\n")
-        
-        analyzed_jobs = []
-        
-        for job in jobs:
-            analysis = calculate_match(job)
-            analyzed_jobs.append(analysis)
-            
-        analyzed_jobs = [calculate_match(job) for job in jobs]        
+        print(f"[JARVIS] Found {len(jobs)} jobs.\n")
+
+        analyzed_jobs = [
+            calculate_match(job, CANDIDATE_PROFILE, query, location)
+            for job in jobs
+        ]
         analyzed_jobs.sort(key=lambda x: x["score"], reverse=True)
             
         print("=" * 60)
@@ -38,10 +36,13 @@ def main():
             print(f"\n#{index} {job['title']}")
             print(f"Company: {job['company']}")
             print(f"Location: {job['location']}")
-            print(f"Match: {job['score']}%")
+            print(f"Salary: {job['salary']}")
+            print(f"Match: {job['score']}% ({job['confidence']} confidence)")
+            print(f"Recommendation: {job['recommendation']}")
             print("Matched:", ", ".join(job["matched_skills"]) if job["matched_skills"] else "None")
             print("Missing:", ", ".join(job["missing_skills"]) if job["missing_skills"] else "None")
-            print(f"url:{job['url']}")
+            print("Strengths:", ", ".join(job["strengths"]))
+            print(f"URL: {job['url']}")
         
     except Exception as e:
         print("\n[JARVIS ERROR]", e)   
