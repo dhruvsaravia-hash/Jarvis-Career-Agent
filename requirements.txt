@@ -3,3 +3,4 @@ python-dotenv
 pdfplumber
 openai
 python-docx
+streamlit
