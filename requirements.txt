@@ -1,3 +1,5 @@
 requests
 python-dotenv
 pdfplumber
+openai
+python-docx
