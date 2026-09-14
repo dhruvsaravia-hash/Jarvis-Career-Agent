@@ -1,27 +1,36 @@
 from agent import JarvisAgent
 import webbrowser
 
+
 def main():
-    print("="*60)
+    print("=" * 60)
     print("         🤖 JARVIS CAREER AGENT")
     print("          AI-Powered Career Assistant")
-    print("="*60)
+    print("=" * 60)
 
-    query = input("\nWhat type of job are you looking for: ")
-    location = input("location: ")
-    resume_path = input("Enter resume path(press Enter for default resume.pdf): ").strip().strip('"')
-    
+    query = input("\nWhat type of job are you looking for: ").strip()
+    location = input("location: ").strip()
+
+    resume_path = (
+        input(
+            "Enter resume path(press Enter for default resume.pdf): "
+        )
+        .strip()
+        .strip('"')
+    )
+
     if not resume_path:
         resume_path = "resume.pdf"
-    
+
     print("\n" + "-" * 60)
     print("🎯 JOB SEARCH")
     print("-" * 60)
     print(f"Role     : {query}")
     print(f"Location : {location}")
     print(f"Resume   : {resume_path}")
+
     agent = JarvisAgent()
-    
+
     print("\n" + "-" * 60)
     print("🧠 PHASE 1 — UNDERSTANDING REQUEST")
     print("-" * 60)
@@ -29,13 +38,32 @@ def main():
     print("✓ Understanding job requirements")
     print("✓ Understanding preferred location")
     print("✓ Preparing candidate analysis")
-    
-    matches = agent.run(query, location, resume_path)
-    matches = matches.get("jobs", [])
-    
+
+    result = agent.run(
+        query,
+        location,
+        resume_path
+    )
+
+    if not result.get("success", False):
+        print(
+            "\n[JARVIS] "
+            + result.get(
+                "message",
+                "Unable to complete the job search."
+            )
+        )
+        return
+
+    matches = result.get("jobs", [])
+
     if not matches:
         print("\n[JARVIS] No suitable jobs found.")
         return
+
+    # =========================================================
+    # TOP JOB MATCHES
+    # =========================================================
 
     print("\n" + "-" * 60)
     print("🏆 TOP JOB MATCHES")
@@ -52,39 +80,136 @@ def main():
         else:
             badge = "⚪ PARTIAL MATCH"
 
-        print(f"\n#{i} {job.get('title', 'Unknown title')}")
-        print(f"🏢 Company: {job.get('company', 'Unknown company')}")
-        print(f"📍 Location: {job.get('location', 'Not specified')}")
-        print(f"🏷️ Source: {job.get('source', 'Unknown source')}")
-        print(f"⭐ Match Score: {score}% — {badge}")
-        print(f"🎯 Confidence: {job.get('confidence', 'medium').upper()}")
-        print(f"🤝 Recommendation: {job.get('recommendation', 'REVIEW')}")
+        print(
+            f"\n#{i} "
+            f"{job.get('title', 'Unknown title')}"
+        )
 
-        matched = job.get("matched_skills", [])
-        missing = job.get("missing_skills", [])
+        print(
+            f"🏢 Company: "
+            f"{job.get('company', 'Unknown company')}"
+        )
+
+        print(
+            f"📍 Location: "
+            f"{job.get('location', 'Not specified')}"
+        )
+
+        print(
+            f"🏷️ Source: "
+            f"{job.get('source', 'Unknown source')}"
+        )
+
+        print(
+            f"⭐ Match Score: "
+            f"{score}% — {badge}"
+        )
+
+        print(
+            f"🎯 Confidence: "
+            f"{job.get('confidence', 'medium').upper()}"
+        )
+
+        print(
+            f"🤝 Recommendation: "
+            f"{job.get('recommendation', 'REVIEW')}"
+        )
+
+        # -----------------------------------------------------
+        # MATCH EVIDENCE
+        # -----------------------------------------------------
+
+        matched = job.get(
+            "matched_skills",
+            []
+        )
+
+        missing = job.get(
+            "missing_skills",
+            []
+        )
+
+        matched_count = job.get(
+            "matched_skill_count",
+            len(matched)
+        )
+
+        required_count = job.get(
+            "required_skill_count",
+            len(matched) + len(missing)
+        )
+
+        skill_percentage = job.get(
+            "skill_match_percentage",
+            0
+        )
+
+        print(
+            f"   Skill Evidence: "
+            f"{matched_count}/{required_count} "
+            f"skills matched "
+            f"({skill_percentage}%)"
+        )
+
+        print(
+            f"   Role Match: "
+            f"{'YES' if job.get('role_matched') else 'NO'}"
+        )
+
+        print(
+            f"   Location Match: "
+            f"{'YES' if job.get('location_matched') else 'NO'}"
+        )
+
+        print(
+            f"   Internship: "
+            f"{'CONFIRMED' if job.get('internship_confirmed') else 'NOT CONFIRMED'}"
+        )
+
+        print(
+            f"   Education: "
+            f"{'DETECTED' if job.get('education_detected') else 'NOT DETECTED'}"
+        )
+
+        # -----------------------------------------------------
+        # JARVIS INSIGHTS
+        # -----------------------------------------------------
 
         if matched:
-            top_skills = ", ".join(matched[:5])
-            insight = f"Strong fit because your {top_skills} skills match this role."
+            top_skills = ", ".join(
+                matched[:5]
+            )
+
+            insight = (
+                "Strong fit because your "
+                f"{top_skills} skills "
+                "match this role."
+            )
         else:
-            insight = "Limited skill overlap found with this role."
+            insight = (
+                "Limited skill overlap found "
+                "with this role."
+            )
 
         if missing:
-            insight += f" Main gaps to improve: {', '.join(missing[:3])}."
+            insight += (
+                " Main gaps to improve: "
+                + ", ".join(missing[:3])
+                + "."
+            )
         else:
-            print("📚 Skills to Improve: None")
-            
-        print(f"\n JARVIS INSIGHTS: {insight}")    
+            print(
+                "📚 Skills to Improve: None"
+            )
 
-        print(f"💡 Why: {', '.join(job.get('strengths', []))}")
+        print(
+            f"\n🧠 JARVIS INSIGHTS: {insight}"
+        )
 
-        url = job.get("url", "")
-        if url:
-            print(f"🔗 Apply: {url}")
-
-        print("-" * 60)
-
-    if matches:
+        
+        # -----------------------------------------------------
+        # FINAL DECISION
+        # -----------------------------------------------------
 
         recommended = [
             job for job in matches
@@ -92,145 +217,82 @@ def main():
         ]
 
         if recommended:
-            best = max(recommended, key=lambda job: job.get("score", 0))
+            best = max(
+                recommended,
+                key=lambda job: job.get("score", 0)
+            )
         else:
-            best = max(matches, key=lambda job: job.get("score", 0))
-
-        score = best.get("score", 0)
-        matched_skills = best.get("matched_skills", [])
-        missing_skills = best.get("missing_skills", [])
-
-        if score >= 80:
-            skill_status = "STRONG"
-        elif score >= 60:
-            skill_status = "GOOD"
-        else:
-            skill_status = "PARTIAL"
-
-        if best.get("recommendation") in ["APPLY", "CONSIDER"]:
-            role_status = "CONFIRMED ✓"
-        else:
-            role_status = "REVIEW"
-
-        if "intern" in best.get("title", "").lower():
-            internship_status = "CONFIRMED ✓"
-        else:
-            internship_status = "NOT CONFIRMED"
+            best = max(
+                matches,
+                key=lambda job: job.get("score", 0)
+            )
 
         print("\n" + "=" * 60)
         print("🤖 JARVIS FINAL DECISION")
         print("=" * 60)
 
-        print("\n🎯 BEST OPPORTUNITY")
+        print(f"\n🎯 BEST OPPORTUNITY")
         print(best.get("title", "Unknown title"))
         print(f"🏢 {best.get('company', 'Unknown company')}")
         print(f"📍 {best.get('location', 'Not specified')}")
 
         print("\n📊 MATCH ANALYSIS")
-        print(f"Skill Match    : {skill_status}")
-        print(f"Role Match     : {role_status}")
-        print(f"Location       : MATCHED ✓")
-        print(f"Internship     : {internship_status}")
-        print(f"Confidence     : {best.get('confidence', 'medium').upper()}")
-        print(f"Match Score    : {score}%")
+        print(f"Match Score : {best.get('score', 0)}%")
+        print(f"Confidence  : {best.get('confidence', 'medium').upper()}")
+        print(f"Recommendation : {best.get('recommendation', 'REVIEW')}")
 
-        print("\n🧠 AGENT REASONING")
+        print("\n🔎 MATCH EVIDENCE")
 
-        if matched_skills:
-            print("✓ Your matching skills: " + ", ".join(matched_skills[:6]))
+        matched_skills = best.get("matched_skills", [])
+        missing_skills = best.get("missing_skills", [])
 
-        if internship_status == "CONFIRMED ✓":
-            print("✓ Internship requirement is satisfied")
-
-        if missing_skills:
-            print("⚠ Main skill gaps: " + ", ".join(missing_skills[:3]))
-
-        print("\n💡 WHY JARVIS CHOSE THIS")
+        print(
+            f"✓ Skills matched: "
+            f"{best.get('matched_skill_count', len(matched_skills))}/"
+            f"{best.get('required_skill_count', len(matched_skills) + len(missing_skills))}"
+        )
 
         if matched_skills:
-            print("✓ Strong skill overlap with your resume")
-
-        print("✓ Location matches your preference")
-
-        if internship_status == "CONFIRMED ✓":
-            print("✓ Internship role confirmed")
+            print("✓ Matching skills: " + ", ".join(matched_skills))
 
         if missing_skills:
-            print("⚠ Consider improving: " + ", ".join(missing_skills[:3]))
+            print("⚠ Skill gaps: " + ", ".join(missing_skills))
 
         print("\n⚡ JARVIS ACTION")
-        print(f"Decision      : {best.get('recommendation', 'REVIEW')}")
-        print(
-            f"Confidence    : "
-            f"{best.get('confidence', 'medium').upper()}"
-        )
 
-        if best.get("recommendation") == "APPLY":
-            print(
-                "Reason        : Strong match with sufficient evidence"
-            )
-            print("Next Action   : Open application")
+        recommendation = best.get("recommendation", "REVIEW")
 
-        elif best.get("recommendation") == "CONSIDER":
-            print(
-                "Reason        : Good match, but review before applying"
-            )
-            print("Next Action   : Review opportunity")
+        if recommendation == "APPLY":
+            print("Decision    : APPLY")
+            print("Next Action : Open application page")
+
+            url = best.get("url", "")
+
+            if url:
+                action = input(
+                    "\nOpen this application in your browser? (yes/no): "
+                ).strip().lower()
+
+                if action == "yes":
+                    webbrowser.open(url)
+                    print("\n[JARVIS] Application webpage opened.")
+                else:
+                    print("\n[JARVIS] Application page not opened.")
+
+        elif recommendation == "CONSIDER":
+            print("Decision    : CONSIDER")
+            print("Next Action : Review opportunity before applying")
 
         else:
-            print(
-                "Reason        : Match is not strong enough"
-            )
-            print("Next Action   : Continue searching")
-
-        strong_matches = sum(
-            1 for job in matches
-            if job.get("score", 0) >= 80
-        )
-
-        apply_count = sum(
-            1 for job in matches
-            if job.get("recommendation") == "APPLY"
-        )
-
-        print("\n" + "-" * 60)
-        print("📌 AGENT SUMMARY")
-        print("-" * 60)
-
-        print(f"Jobs discovered       : {len(matches)}")
-        print(f"Strong matches        : {strong_matches}")
-        print(f"Recommended to apply  : {apply_count}")
-
-        if best.get("url"):
-
-            print("\n🚀 APPLICATION")
-            print(f"Apply here: {best['url']}")
-
-            action = input(
-                "\nOpen this application in your browser? (yes/no): "
-            ).strip().lower()
-
-            if action == "yes":
-
-                webbrowser.open(best["url"])
-
-                print(
-                    "\n[JARVIS] Application webpage opened "
-                    "in your browser."
-                )
-
-            else:
-
-                print(
-                    "\n[JARVIS] Application page not opened."
-                )
+            print("Decision    : REVIEW")
+            print("Next Action : Continue searching for stronger matches")
 
     print("\n" + "=" * 60)
     print("🤖 JARVIS ANALYSIS COMPLETE")
     print("=" * 60)
-print("STATUS: SUCCESS ✓")
-print("=" * 60)
-      
-        
+
+    print("STATUS: SUCCESS ✓")
+
+
 if __name__ == "__main__":
-    main()         
+    main()

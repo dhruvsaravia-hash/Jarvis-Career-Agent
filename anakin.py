@@ -10,6 +10,10 @@ ANAKIN_API_KEY = os.getenv("ANAKIN_API_KEY")
 BASE_URL = "https://api.anakin.io"
 
 
+# ============================================================
+# ANAKIN API
+# ============================================================
+
 def get_headers():
     if not ANAKIN_API_KEY:
         raise RuntimeError(
@@ -23,10 +27,6 @@ def get_headers():
 
 
 def run_anakin_action(action_id, params):
-    """
-    Run any Anakin Wire action and wait for the result.
-    """
-
     payload = {
         "action_id": action_id,
         "params": params
@@ -41,14 +41,16 @@ def run_anakin_action(action_id, params):
 
     if response.status_code != 202:
         raise RuntimeError(
-            f"Task creation failed "
-            f"({response.status_code}): {response.text}"
+            f"Task creation failed ({response.status_code}): "
+            f"{response.text}"
         )
 
     job_id = response.json().get("job_id")
 
     if not job_id:
-        raise RuntimeError("Anakin did not return a job_id.")
+        raise RuntimeError(
+            "Anakin did not return a job_id."
+        )
 
     poll_url = f"{BASE_URL}/v1/wire/jobs/{job_id}"
 
@@ -61,7 +63,10 @@ def run_anakin_action(action_id, params):
         )
 
         if not response.ok:
-            raise RuntimeError(f"Polling failed ({response.status_code}): {response.text}")
+            raise RuntimeError(
+                f"Polling failed ({response.status_code}): "
+                f"{response.text}"
+            )
 
         result = response.json()
         status = result.get("status")
@@ -70,103 +75,128 @@ def run_anakin_action(action_id, params):
             return result
 
         if status in ("failed", "error"):
-            raise RuntimeError(f"Anakin task failed: {result}")
+            raise RuntimeError(
+                f"Anakin task failed: {result}"
+            )
 
-        retry_after = result.get("retry_after_ms", 2000)
+        retry_after = result.get(
+            "retry_after_ms",
+            2000
+        )
 
         time.sleep(retry_after / 1000)
 
-    raise RuntimeError("Anakin task timed out after 30 polling attempts.")
+    raise RuntimeError(
+        "Anakin task timed out after 30 polling attempts."
+    )
 
+
+# ============================================================
+# RESULT EXTRACTION
+# ============================================================
 
 def extract_items(result):
     """
-    Extract job items from an Anakin search result.
+    Extract job items from the common Anakin response structure.
     """
 
-    try:
-        return (
-            result
-            .get("data", {})
-            .get("data", {})
-            .get("items", [])
-        )
-    except AttributeError:
+    if not isinstance(result, dict):
         return []
 
+    data = result.get("data", {})
+
+    if not isinstance(data, dict):
+        return []
+
+    data = data.get("data", {})
+
+    if not isinstance(data, dict):
+        return []
+
+    items = data.get("items", [])
+
+    if isinstance(items, list):
+        return items
+
+    jobs = data.get("jobs", [])
+
+    if isinstance(jobs, list):
+        return jobs
+
+    return []
+
+
+# ============================================================
+# AMAZON JOBS
+# ============================================================
 
 def normalize_amazon_jobs(jobs):
+
     normalized = []
-    
+
     for job in jobs:
+
+        if not isinstance(job, dict):
+            continue
+
         company = job.get("company", "")
+
         if isinstance(company, dict):
             company = company.get("name", "")
-            
+
         location = job.get("location", "")
+
         if isinstance(location, dict):
             location = location.get("raw", "")
-                
+
         normalized.append({
             **job,
-            "company": company,
-            "location": location,
-            "url": job.get("application_url") or job.get("url") or "",
+            "company": str(company or ""),
+            "location": str(location or ""),
+            "url": (
+                job.get("application_url")
+                or job.get("url")
+                or ""
+            ),
             "snippet": job.get("snippet", "")
         })
-    return normalized   
 
-def read_job_page(url):
-    """
-    Fetch the public job page and return its text.
-    """
-    
-    if not url:
-        return ""
-    
-    headers={
-        "User-Agent":(
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/140.0 Safari/537.36"
-        )
-    }
-    
-    try:
-        response = requests.get(url, headers=headers, timeout=15)
-        response.raise_for_status()
-        return response.text
-    except requests.exceptions.RequestException as e:
-        return ""
-    
+    return normalized
+
+
 def search_amazon_jobs(query, location):
-    """
-    Search Amazon Jobs with pagination until jobs
-    matching the requested location are found.
-    """
 
     queries = [query]
-    
-    words_to_remove = {"internship", "intern", "job", "jobs", "role", "positions", "positions"}
-    
+
+    words_to_remove = {
+        "internship",
+        "intern",
+        "job",
+        "jobs",
+        "role",
+        "positions"
+    }
+
     cleaned_words = [
-        word for word in query.split()
+        word
+        for word in query.split()
         if word.lower() not in words_to_remove
     ]
-    
+
     cleaned_query = " ".join(cleaned_words).strip()
-    
-    if cleaned_query and cleaned_query.lower() != query.lower():
+
+    if (
+        cleaned_query
+        and cleaned_query.lower() != query.lower()
+    ):
         queries.append(cleaned_query)
-    
+
     for current_query in queries:
-        
-        all_jobs = []
 
         for start in range(0, 250, 50):
 
             params = {
-                "query": query,
+                "query": current_query,
                 "start": start,
                 "size": 50,
                 "filter_facets": [],
@@ -182,36 +212,49 @@ def search_amazon_jobs(query, location):
                 params
             )
 
-            jobs = extract_items(result)
-            jobs = normalize_amazon_jobs(jobs)
-            
+            jobs = normalize_amazon_jobs(
+                extract_items(result)
+            )
+
             if not jobs:
                 break
-            
-            all_jobs.extend(jobs)
+
             location_lower = location.lower()
-            
+
             matching_jobs = []
-            
+
             for job in jobs:
 
-                job_location = job.get("location", "")
+                job_location = str(
+                    job.get("location", "")
+                ).lower()
 
-                if isinstance(job_location, dict):
-                    job_location = job_location.get("raw", "")
-
-                if location_lower in str(job_location).lower():
+                if location_lower in job_location:
                     matching_jobs.append(job)
 
             if matching_jobs:
+
                 internship_jobs = []
 
                 for job in matching_jobs:
-                    title = str(job.get("title", "")).lower()
-                    job_type = str(job.get("job_type", "")).lower()
-                    employment_type = str(job.get("employment_type", "")).lower()
 
-                    if ("intern" in title or "intern" in job_type or "intern" in employment_type):
+                    title = str(
+                        job.get("title", "")
+                    ).lower()
+
+                    job_type = str(
+                        job.get("job_type", "")
+                    ).lower()
+
+                    employment_type = str(
+                        job.get("employment_type", "")
+                    ).lower()
+
+                    if (
+                        "intern" in title
+                        or "intern" in job_type
+                        or "intern" in employment_type
+                    ):
                         internship_jobs.append(job)
 
                 if internship_jobs:
@@ -219,23 +262,35 @@ def search_amazon_jobs(query, location):
 
     return []
 
+
+# ============================================================
+# INDEED
+# ============================================================
+
 def search_indeed_jobs(query, location):
-    
+
     params = {
         "query": query,
         "location": location,
         "start": 0,
         "sort": "relevance",
-        "country_domain": "in" 
+        "country_domain": "in"
     }
-    
-    result = run_anakin_action("in_search_jobs", params)
-    jobs = extract_items(result)
-    
-    return jobs
+
+    result = run_anakin_action(
+        "in_search_jobs",
+        params
+    )
+
+    return extract_items(result)
+
+
+# ============================================================
+# MICROSOFT
+# ============================================================
 
 def search_microsoft_jobs(query, location):
-    
+
     params = {
         "search_query": query,
         "location": location,
@@ -243,277 +298,681 @@ def search_microsoft_jobs(query, location):
         "sort_by": "relevance",
         "filter_profession": "Software Engineering"
     }
-    
-    result = run_anakin_action("act_apply_careers_microsoft_job_search_listing", params)
-    
-    jobs = extract_items(result)
-    
-    return jobs
+
+    result = run_anakin_action(
+        "act_apply_careers_microsoft_job_search_listing",
+        params
+    )
+
+    return extract_items(result)
+
+
+# ============================================================
+# META
+# ============================================================
 
 def search_meta_jobs(query, location):
-    
+
     params = {
         "search_query": query,
         "location": location,
     }
-    
-    result = run_anakin_action("act_metacareers_job_search_listing", params)
-    
-    jobs = extract_items(result)
-    
-    return jobs
+
+    result = run_anakin_action(
+        "act_metacareers_job_search_listing",
+        params
+    )
+
+    return extract_items(result)
+
+
+# ============================================================
+# COMPANY EXTRACTION
+# ============================================================
+
+def extract_company_from_title(title):
+
+    title = str(title or "").strip()
+
+    if not title:
+        return ""
+
+    # Remove endings such as "| Careers", "| Jobs", "| Internships"
+    cleaned = re.sub(
+        r"\s*\|\s*(careers?|jobs?|job openings?|internships?)$",
+        "",
+        title,
+        flags=re.IGNORECASE
+    ).strip()
+
+    parts = [
+        part.strip()
+        for part in re.split(
+            r"\s+-\s+|\s*\|\s*",
+            cleaned
+        )
+        if part.strip()
+    ]
+
+    if not parts:
+        return ""
+
+    generic_words = {
+        "career",
+        "careers",
+        "career page",
+        "jobs",
+        "job",
+        "job openings",
+        "job listing",
+        "job listings",
+        "intern",
+        "internship",
+        "internships",
+        "developer",
+        "developers",
+        "engineer",
+        "engineering",
+        "software",
+        "software developer",
+        "software engineer",
+        "python",
+        "java",
+        "javascript",
+        "ai",
+        "machine learning",
+        "data",
+        "technology",
+        "technologies",
+        "company",
+        "employment",
+        "opportunities",
+        "apply now",
+        "job board"
+    }
+
+    job_words = [
+        "intern",
+        "internship",
+        "developer",
+        "engineer",
+        "software",
+        "python",
+        "java",
+        "javascript",
+        "machine learning",
+        "data analyst",
+        "data science",
+        "data analytics",
+        "frontend",
+        "backend",
+        "full stack",
+        "apply now",
+        "job board"
+    ]
+
+    def is_job_or_generic(part):
+        part_lower = part.lower().strip()
+
+        if part_lower in generic_words:
+            return True
+
+        return any(
+            re.search(
+                rf"\b{re.escape(word)}\b",
+                part_lower
+            )
+            for word in job_words
+        )
+
+    def is_location(part):
+        part_lower = part.lower().strip()
+
+        location_patterns = [
+            r"^[a-z .'-]+,\s*[a-z .'-]+$",
+            r"^(remote|hybrid|work from home)$",
+            r"^(mumbai|pune|thane|delhi|bangalore|bengaluru|hyderabad)$"
+        ]
+
+        return any(
+            re.search(
+                pattern,
+                part_lower,
+                re.IGNORECASE
+            )
+            for pattern in location_patterns
+        )
+
+    # FIX: Extract employer from Unstop-style titles
+    # Example:
+    # "Software Engineer Intern - Google - Unstop"
+    # -> Google
+    unstop_match = re.search(
+        r"\b(?:developer intern|software engineer intern|internship|intern)"
+        r"\s*[-–|]\s*(.+?)"
+        r"\s*[-–|]\s*unstop$",
+        cleaned,
+        re.IGNORECASE
+    )
+
+    if unstop_match:
+        company = unstop_match.group(1).strip()
+
+        if (
+            company
+            and not is_job_or_generic(company)
+            and not is_location(company)
+        ):
+            return company
+
+    # Example:
+    # "Software Developer at Microsoft"
+    # -> Microsoft
+    at_match = re.search(
+        r"\bat\s+(.+?)(?=\s+\||\s+-\s+|\s+–\s+|$)",
+        cleaned,
+        re.IGNORECASE
+    )
+
+    if at_match:
+        company = at_match.group(1).strip()
+
+        if (
+            company
+            and not is_job_or_generic(company)
+            and not is_location(company)
+        ):
+            return company
+
+    # Example:
+    # "Hiring Google - Software Engineer"
+    # -> Google
+    hiring_match = re.search(
+        r"\bhiring\s+(.+?)(?=\s*:\s*|\s+\||\s+-\s+|\s+–\s+|$)",
+        cleaned,
+        re.IGNORECASE
+    )
+
+    if hiring_match:
+        company = hiring_match.group(1).strip()
+
+        if (
+            company
+            and not is_job_or_generic(company)
+            and not is_location(company)
+        ):
+            return company
+
+    # Example:
+    # "Software Engineer from Microsoft"
+    # -> Microsoft
+    from_match = re.search(
+        r"\bfrom\s+(.+?)(?=\s+\||\s+-\s+|\s+–\s+|$)",
+        cleaned,
+        re.IGNORECASE
+    )
+
+    if from_match:
+        company = from_match.group(1).strip()
+
+        if (
+            company
+            and not is_job_or_generic(company)
+            and not is_location(company)
+        ):
+            return company
+
+    # General fallback:
+    # Check parts from right to left and use the first
+    # part that does not look like a job title or location.
+    for part in reversed(parts):
+
+        if is_job_or_generic(part):
+            continue
+
+        if is_location(part):
+            continue
+
+        return part
+
+    return ""
+def read_job_page(url):
+
+    if not url:
+        return ""
+
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/140.0 Safari/537.36"
+        )
+    }
+
+    try:
+
+        response = requests.get(
+            url,
+            headers=headers,
+            timeout=15
+        )
+
+        response.raise_for_status()
+
+        return response.text
+
+    except requests.exceptions.RequestException:
+        return ""
+
+
+# ============================================================
+# TAVILY WEB SEARCH
+# ============================================================
 
 def search_web_jobs(query, location):
-    
-    tavily_key=os.getenv("TAVILY_API_KEY")
-    
+
+    tavily_key = os.getenv("TAVILY_API_KEY")
+
     if not tavily_key:
-        print("[JARVIS] TAVILY_API_KEY is missing.")
+        print(
+            "[JARVIS] TAVILY_API_KEY is missing."
+        )
         return []
-    
+
     search_query = (
-                    f'{query}" "{location} '
-                    f'("software development intern" OR "software engineer intern" '
-                    f'OR "Software developer intern" OR "developer intern") '
-                    f'("apply" OR "application" OR "careers") '
-                    f'-youtube -instagram -reddit -blog -article -guide -tutorial -tutorial'    
-                    )
-    try: 
-        response = requests.post("https://api.tavily.com/search",
-                                 headers={
-                                     "Authorization": f"Bearer {tavily_key}",
-                                     "Content-Type": "application/json"
-                                 },
-                                 json={
-                                     "query": search_query,
-                                     "search_depth": "advanced",
-                                     "max_result": 20,
-                                     "include_answer": False,
-                                     "include_raw_content": True
-                                 },
-                                 timeout=30
-                            )
+        f'"{query}" "{location}" '
+        f'("intern" OR "internship" OR "job") '
+        f'("apply" OR "application" OR "careers") '
+        f'-youtube -instagram -reddit '
+        f'-blog -article -guide -tutorial '
+        f'-visa -salary -negotiation'
+    )
+
+    print(
+        f"[JARVIS] Web search query: "
+        f"{search_query}"
+    )
+
+    try:
+
+        response = requests.post(
+            "https://api.tavily.com/search",
+            headers={
+                "Authorization":
+                    f"Bearer {tavily_key}",
+                "Content-Type":
+                    "application/json"
+            },
+            json={
+                "query": search_query,
+                "search_depth": "advanced",
+                "max_results": 20,
+                "include_answer": False,
+                "include_raw_content": True
+            },
+            timeout=30
+        )
+
         response.raise_for_status()
+
         data = response.json()
-        results=data.get("results", [])
-        
+
+        results = data.get("results", [])
+
+        print(
+            f"[JARVIS] Tavily returned "
+            f"{len(results)} results."
+        )
+
         jobs = []
+
+        trusted_domains = {
+            "linkedin.com",
+            "indeed.com",
+            "unstop.com",
+            "wellfound.com",
+            "builtin.com",
+            "adzuna.in",
+            "keka.com",
+            "freshershunt.in",
+            "hiretoday.in",
+            "wizzer.in",
+            "fresherscareer.in",
+            "atlss.in"
+        }
+
+        job_words = [
+            "intern",
+            "internship",
+            "developer",
+            "software engineer",
+            "software development",
+            "data analyst",
+            "data analytics",
+            "data science",
+            "career",
+            "job opening",
+            "job openings",
+            "hiring",
+            "vacancy",
+            "apply"
+        ]
         
+        blocked_domains = {
+            "wikipedia.org",
+            "britannica.com",
+            "incredibleindia.gov.in",
+            "mumbaitourism.travel",
+            "oecd.org"
+        }
+
+        blocked_url_words = [
+            "/jobs?",
+            "/jobs/",
+            "/internships?",
+            "/internship/",
+            "/search",
+            "/search?",
+            "/collections/",
+            "/category/",
+            "/categories/"
+        ]
         for result in results:
-            title=(result.get("title") or "").strip()
-            url=(result.get("url") or "").strip()
-            content=(result.get("content") or "").strip()
-            raw_content=(result.get("raw_content") or "").strip()
+
+            title = (
+                result.get("title") or ""
+            ).strip()
+
+            url = (
+                result.get("url") or ""
+            ).strip()
+
+            content = (
+                result.get("content") or ""
+            ).strip()
+
+            raw_content = (
+                result.get("raw_content") or ""
+            ).strip()
+
+            if not title or not url:
+                continue
+            
+            url_lower = url.lower()
+
+            if any(
+                domain in url_lower
+                for domain in blocked_domains
+            ):
+                print(
+                    f"[DEBUG] Rejected blocked domain: {title}"
+                )
+                continue
+
+            if any(
+                blocked_word in url_lower
+                for blocked_word in blocked_url_words
+            ):
+                print(
+                    f"[DEBUG] Rejected listing/search page: {title}"
+                )
+                continue
+
+            combined_text = (
+                title + " "
+                + content + " "
+                + raw_content
+            )                        
+            if any(blocked_word in url.lower() for blocked_word in blocked_url_words):
+                print(f"[DEBUG] Rejected listing/search page: {title}")
+                continue
+            
+            if any(domain in url.lower() for domain in blocked_domains):
+                print(f"[DEBUG] Rejected blocked domain: {title}")
+                continue
+
+            if any(blocked_word in url.lower() for blocked_word in blocked_url_words):
+                print(f"[DEBUG] Rejected listing/search page: {title}")
+                continue
             
             combined_text = (title + " " + content + " " + raw_content)
-            
+
             job_text = combined_text.lower()
-            
-            generic_page_words = [
-                                  "jobs in", 
-                                  "job search", 
-                                  "job openings", 
-                                  "search jobs", 
-                                  "job listings", 
-                                  "jobs page", 
-                                  "career opportunities", 
-                                  "internships in", 
-                                  "internship listings",
-                                  "job vacancies",
-                                  "vacancies",
-                                  "job vacancies in",
-                                  "software developer intern jobs",
-                                  "software internship jobs",
-                                  "software intern jobs",
-                                  "internship software jobs",
-                                  "job vacancies",
-                                  "jobs in mumbai",
-                                  "jobs in india",
-                                  "emploi(s) pour",
-                                  ]
-            blocked_url_terms = [
-                "youtube.com",
-                "youtu.be",
-                "/blog/",
-                "/article/",
-                "/articles/",
-                "/guide/",
-                "/guides/",
-                "/tutorial/",
-                "/news/",
-                "/programs/",
-                "/program/",
-                "linkedin.com/pulse/",
-                "linkedin.com/posts/",
-                "linkedin.com/feed/",            
-            ]
-            
-            blocked_title_terms = [
-                "how to",
-                "what is",
-                "thoughts on",
-                "minimum every",
-                "four-year internship program",
-                "career center",
-                "guide",
-                "tutorial",
-                "article",
-            ]
-            
-            if any(term in title.lower() for term in blocked_title_terms):
-                continue
-            
-            if any(term in url.lower() for term in blocked_url_terms):
-                continue
-            
-            if re.match(r"intern\d+\s+.*internships?$", title, re.IGNORECASE):
-                continue
-            
-            if "internshala.com/internships/" in url.lower():
-                continue
-            
-            if re.search(r"\bjobs?\s*-\s*(naukri|indeed|linkedin|unstop)\b", title, re.IGNORECASE):
-                continue
-            
-            non_job_titles = [
-            "emploi(s) pour",
-            "choice for",
-            "discussion",
-            "reddit",
-            "pdf",
-            "job search",
-            "job listings",
-            "internship listings",
-            ]
-                        
-            if any(phrase in title.lower() for phrase in non_job_titles):
-                continue
-            
-            listing_domains = [
-                "glassdoor.",
-                "naukri.com",
-                "indeed.com",
-                "linkedin.com/jobs",
-                "foundit.in/search",
-                "simplyhired.co.in",
-                "shine.com",
-                "instahyre.com",
-            ]
-
-            generic_url_terms = [
-                "/internships",
-                "/jobs",
-                "/job-listings",
-                "/internship-listings",
-                "/career-opportunities",
-                "indeed.co.in/",
-                "indeed.com/",
-            ]
-
-            if any(term in url.lower() for term in generic_url_terms):
-                continue
-            
-            if any(domain in url.lower() for domain in listing_domains):
-                continue  
-                  
-            job_words = ["intern", "internship", "job", "developer", "software engineer", "software development", "job", "career"]
-            
-            if not any(word in job_text for word in job_words):
-                continue
-            
-            company = ""
-
             title_lower = title.lower()
             url_lower = url.lower()
-            job_text_lower = job_text.lower()
+            
+            # --------------------------------------------------------
+            # REJECT NON-JOB / DISCUSSION PAGES
+            # --------------------------------------------------------
 
-            known_companies = {
-                "google": "Google",
-                "microsoft": "Microsoft",
-                "amazon": "Amazon",
-                "meta": "Meta",
-                "atlassian": "Atlassian",
-                "apple": "Apple",
-                "ibm": "IBM",
-                "oracle": "Oracle",
-                "accenture": "Accenture",
-                "tcs": "TCS",
-                "infosys": "Infosys",
-                "wipro": "Wipro",
-                "deloitte": "Deloitte",
-                "capgemini": "Capgemini",
-                "browserstack": "BrowserStack",
-                "dg7": "DG7 Solutions",
-                "adengage": "AdEngage",
-                "aryaxai": "AryaXAI",
-                "beam innovate": "Beam Innovate Pvt Ltd",
-                "ventura securities": "Ventura Securities Ltd",
-                "convergence it services": "Convergence IT Services",
-            }
+            blocked_page_patterns = [
+                "groups.google.com",
+                "reddit.com",
+                "youtube.com",
+                "wikipedia.org",
+                "/blog/",
+                "/article/",
+                "/news/",
+                "/forum/",
+                "/discussion/",
+            ]
 
-            for name, company_name in known_companies.items():
-                if name in title_lower:
-                    company = company_name
+            if any(pattern in url_lower for pattern in blocked_page_patterns):
+                print(f"[DEBUG] Rejected non-job page: {title}")
+                continue
+
+            
+            # --------------------------------------------------------
+            # REJECT OBVIOUSLY OLD JOB RESULTS
+            # --------------------------------------------------------
+
+            current_year = 2026
+
+            old_year_match = re.search(
+                r"\b(20\d{2})\b",
+                title
+            )
+
+            if old_year_match:
+                result_year = int(old_year_match.group(1))
+
+                if result_year < current_year:
+                    print(
+                        f"[DEBUG] Rejected old job result "
+                        f"({result_year}): {title}"
+                    )
+                    continue
+            if any(domain in url_lower for domain in blocked_domains):
+                print(f"[DEBUG] Rejected blocked domain: {title}")
+                continue
+            print(
+                f"[DEBUG] Checking result: {title}"
+            )
+            print(
+                f"[DEBUG] URL: {url}"
+            )
+            print(
+                f"[DEBUG] Contains location? "
+                f"{location.lower() in job_text}"
+            )
+
+            # ------------------------------------------------
+            # JOB FILTER
+            # ------------------------------------------------
+
+            query_lower = query.lower()
+
+            title_has_job_word = any(
+                re.search(
+                    rf"\b{re.escape(word)}\b",
+                    title_lower
+                )
+                for word in job_words
+            )
+
+            if "internship" in query_lower or "intern" in query_lower:
+                title_is_relevant = (
+                    re.search(r"\bintern(ship)?\b", title_lower)
+                    or re.search(r"\btrainee\b", title_lower)
+                )
+            else:
+                title_is_relevant = title_has_job_word
+
+            if not title_is_relevant:
+                print(
+                    f"[DEBUG] Rejected by title relevance filter: "
+                    f"{title}"
+                )
+                continue
+
+            # ------------------------------------------------
+            # LOCATION FILTER
+            # ------------------------------------------------
+
+                        # ------------------------------------------------
+            # QUERY-SPECIFIC ROLE FILTER
+            # ------------------------------------------------
+
+            query_words = [
+                word
+                for word in re.findall(
+                    r"\b[a-zA-Z][a-zA-Z+#.-]*\b",
+                    query_lower
+                )
+                if word not in {
+                    "intern",
+                    "internship",
+                    "job",
+                    "jobs",
+                    "role",
+                    "opening",
+                    "opportunity"
+                }
+            ]
+
+            role_keywords_found = 0
+
+            for word in query_words:
+                if re.search(
+                    rf"\b{re.escape(word)}\b",
+                    job_text
+                ):
+                    role_keywords_found += 1
+
+            if query_words and role_keywords_found == 0:
+                print(
+                    f"[DEBUG] Rejected: query role not found: "
+                    f"{title}"
+                )
+                continue
+            
+
+            if location.lower() not in job_text:
+                continue
+
+            # ------------------------------------------------
+            # COMPANY EXTRACTION
+            # ------------------------------------------------
+
+            company = ""
+
+            known_companies = [
+                "google",
+                "microsoft",
+                "amazon",
+                "meta",
+                "apple",
+                "ibm",
+                "accenture",
+                "tcs",
+                "infosys",
+                "wipro",
+                "capgemini",
+                "cognizant",
+                "deloitte",
+                "pwc",
+                "ey",
+                "kpmg",
+                "oracle",
+                "adobe",
+                "nvidia",
+                "intel",
+                "salesforce"
+            ]
+
+            for known_company in known_companies:
+
+                if known_company in title_lower:
+                    company = known_company.title()
                     break
 
-            if not company and "stackbinary" in title_lower:
-                company = "Stackbinary"
-
-            if not company and "stackbinary.io" in url_lower:
-                company = "Stackbinary"
-
-            if not company and "dg7" in title_lower:
-                company = "DG7 Solutions"
-
-            if not company and "dg7.in" in url_lower:
-                company = "DG7 Solutions"
-
             if not company:
-                parts = [p.strip() for p in re.split(r"\s+-\s+", title)]
+                company = extract_company_from_title(title)
+                
+                # Fallback: extract company from the job URL
+                if not company and url:
+                    domain_match = re.search(
+                        r"https?://(?:www\.)?([^./]+)\.",
+                        url,
+                        re.IGNORECASE
+                    )
 
-                if len(parts) >= 2:
-                    first_part = parts[0].lower()
-                    second_part = parts[1].strip()
+                    if domain_match:
+                        domain_company = domain_match.group(1).strip()
 
-                    job_keywords = [
-                        "intern",
-                        "internship",
-                        "developer",
-                        "engineer",
-                        "software",
-                        "python",
-                        "ai",
-                        "machine learning",
-                    ]
+                        blocked_domains = {
+                            "linkedin",
+                            "indeed",
+                            "naukri",
+                            "unstop",
+                            "glassdoor",
+                            "internshala",
+                            "foundit",
+                            "wellfound",
+                            "adzuna",
+                            "candidhr",
+                            "workday",
+                            "google",
+                            "microsoft",
+                            "amazon"
+                        }
 
-                    if any(word in first_part for word in job_keywords):
-                        company = second_part
+                        if domain_company.lower() not in blocked_domains:
+                            company = (
+                                domain_company
+                                .replace("-", " ")
+                                .replace("_", " ")
+                                .title()
+                            )
+                        
+                        if company.lower() == "edwards":
+                            company = "Edwards Lifesciences"
 
-            if company:
-                company = re.sub(
-                    r"\s*\|\s*(Stackbinary Careers|Careers|Jobs|Internships?)$",
-                    "",
-                    company,
-                    flags=re.IGNORECASE
-                ).strip()
+                        if company.lower() == "reliancegames":
+                            company = "Reliance Games"    
+    
+                platform_names = {
+                        "unstop",
+                        "jobleads",
+                        "linkedin",
+                        "indeed",
+                        "glassdoor",
+                        "naukri",
+                        "internshala",
+                        "foundit",
+                        "wellfound",
+                        "adzuna"
+                    }        
 
-            if company.lower() in [
-                "internships",
-                "internship",
-                "jobs",
-                "job",
-                "careers",
-                "career",
-                "company",
-                "employer",
-                "unknown",
-                "n/a",
-                "na",
-                "adzuna.in",
-            ]:
+            if company.lower().strip() in platform_names:
                 company = ""
+                        
+            # ------------------------------------------------
+            # KEKA COMPANY EXTRACTION
+            # ------------------------------------------------
 
-            if not company and ".keka.com/careers/" in url_lower:
+            if not company and "keka.com" in url_lower:
+
                 keka_match = re.search(
                     r"https?://([^.]+)\.keka\.com",
                     url,
@@ -521,308 +980,379 @@ def search_web_jobs(query, location):
                 )
 
                 if keka_match:
+
                     company = (
                         keka_match.group(1)
                         .replace("-", " ")
+                        .replace("_", " ")
                         .title()
                     )
 
-            if not company and "fresherscareer.in" in url_lower:
-                company = "Freshers Career"
+            # ------------------------------------------------
+            # JSON-LD COMPANY EXTRACTION
+            # ------------------------------------------------
 
-            if not company and "credenceanalytics.com" in url_lower:
-                company = "Credence Analytics"
+            if not company and raw_content:
 
-            if not company:
-                bebee_match = re.search(
-                    r"^(.+?)\s+-\s+(.+?)\s*\|\s*BeBee$",
-                    title,
-                    re.IGNORECASE
+                company_match = re.search(
+                    r'"hiringOrganization"\s*:\s*'
+                    r'\{.*?"name"\s*:\s*"([^"]+)"',
+                    raw_content,
+                    re.IGNORECASE | re.DOTALL
                 )
 
-                if bebee_match:
-                    company = bebee_match.group(2).strip()
+                if company_match:
+                    company = (
+                        company_match.group(1)
+                        .strip()
+                    )
 
-            if not company:
-                snatcho_match = re.search(
-                    r"Snatcho hiring .+?\s+in\s+",
-                    title,
-                    re.IGNORECASE
-                )
+            # ------------------------------------------------
+            # CLEAN COMPANY NAME
+            # ------------------------------------------------
 
-                if snatcho_match:
-                    company = "Snatcho"
+            if company:
 
-            company = company.strip()
+                company = re.sub(
+                    r"\s*\|\s*(careers?|jobs?|internships?)$",
+                    "",
+                    company,
+                    flags=re.IGNORECASE
+                ).strip()
 
-            if company.lower() in [
-                "company",
-                "employer",
-                "unknown",
-                "n/a",
-                "na",
-                "adzuna.in",
-                "internships",
-                "internship",
-                "jobs",
+            invalid_company_names = {
+                "",
+                "career",
                 "careers",
-            ]:
+                "jobs",
+                "job",
+                "intern",
+                "internship",
+                "internships",
+                "developer",
+                "software developer",
+                "software engineer",
+                "unknown"
+            }
+
+            if company.lower() in invalid_company_names:
                 company = ""
-                                    
-            source_quality = "unknown"
 
-            trusted_domains = [
-                "/careers/",
-                "/career/",
-                "/jobs/",
-                "/job/",
-                "linkedin.com",
-                "indeed.com",
-                "unstop.com",
-                "wellfound.com",
-                "builtin.com",
-                "bebee.com",
-                "keka.com",
-                "freshershunt.in",
-                "hiretoday.in",
-                "credenceanalytics.com",
-                "adzuna.in",
-                "wizzer.in",
-                "fresherscareer.in",
-                "atlss.in",
-            ]
+            # ------------------------------------------------
+            # SOURCE QUALITY
+            # ------------------------------------------------
 
-            url_lower = url.lower()
+            source_quality = "unverified"
 
-            if any(domain in url_lower for domain in trusted_domains):
+            if any(
+                domain in url_lower
+                for domain in trusted_domains
+            ):
                 source_quality = "verified"
 
-            detected_location = location
+            # ------------------------------------------------
+            # CREATE JOB
+            # ------------------------------------------------
+            actual_location = ""
+
+            location_patterns = [
+                r"\b(remote|work from home|wfh)\b",
+                r"\b(mumbai|navi mumbai|thane|pune|pimpri|chinchwad)\b",
+                r"\b(bangalore|bengaluru|hyderabad|delhi|noida|gurgaon|gurugram)\b",
+                r"\b(chennai|kolkata|ahmedabad|jaipur|indore)\b",
+            ]
+
+            for pattern in location_patterns:
+                location_match = re.search(
+                    pattern,
+                    combined_text,
+                    re.IGNORECASE
+                )
+
+                if location_match:
+                    actual_location = location_match.group(1).strip()
+                    break
+
+            if not actual_location:
+                actual_location = "Unknown"
+
+            print(
+                f"[DEBUG] Actual job location detected: "
+                f"{actual_location}"
+            )
 
 
-            if location.lower() in combined_text.lower():
-                detected_location = location
-                job_data = {
+            job_data = {
                 "title": title,
                 "company": company,
-                "location": detected_location,
+                "location": actual_location,
                 "url": url,
                 "snippet": content,
-                "page_text": raw_content or content,
-                "employment_type": "Internship"
-                if "intern" in job_text
-                else "",
+                "page_text": (
+                    raw_content
+                    or content
+                ),
+                "employment_type": (
+                    "Internship"
+                    if "intern" in job_text
+                    else ""
+                ),
                 "source": "Web Search",
-                "source_quality": source_quality,
+                "source_quality": source_quality
             }
-            
-            if source_quality == "unknown":
-                source_quality = "unverified"
-                print(f"⚠ Unverified source skipped: {url}")
-            
-            job_data["source_quality"] = source_quality
-            jobs.append(job_data)        
-                
-        print(f"✓ {len(jobs)} live jobs collected")
-            
+
+            jobs.append(job_data)
+
+            print(
+                f"[JARVIS] Web job found: "
+                f"{title} | "
+                f"{company or 'Unknown company'}"
+            )
+
+        print(
+            f"[JARVIS] ✓ {len(jobs)} "
+            f"live web jobs collected"
+        )
+
         return jobs
+
     except requests.exceptions.RequestException as e:
-        print(f"[JARVIS] Web search results failed: {e}")
+
+        print(
+            f"[JARVIS] Web search request failed: {e}"
+        )
+
         return []
 
-def search_jobs(query, location):
-    """
-    Main job search function.
+    except Exception as e:
 
-    Tries multiple job sources.
-    If one fails, automatically moves to the next.
-    """
+        print(
+            f"[JARVIS] Web search processing failed: {e}"
+        )
+
+        return []
+
+
+# ============================================================
+# MAIN JOB SEARCH
+# ============================================================
+
+def search_jobs(query, location):
 
     sources = [
-        ("Amazon Jobs",search_amazon_jobs),
-        ("Indeed",search_indeed_jobs),
-        ("Microsoft Careers",search_microsoft_jobs),
-        ("Meta Careers",search_meta_jobs),        
+        ("Amazon Jobs", search_amazon_jobs),
+        ("Indeed", search_indeed_jobs),
+        ("Microsoft Careers", search_microsoft_jobs),
+        ("Meta Careers", search_meta_jobs),
         ("Web Search", search_web_jobs)
     ]
 
     all_jobs = []
+
     for source_name, source_function in sources:
 
-        print(f"→ {source_name:<20}", end="")
+        print(
+            f"→ {source_name:<20}",
+            end=""
+        )
 
         try:
-            jobs = source_function(query, location)
+
+            jobs = source_function(
+                query,
+                location
+            )
 
             if not jobs:
-                continue
 
-            matching_jobs = jobs
+                print(
+                    f" [JARVIS DEBUG] "
+                    f"{source_name} returned 0 jobs"
+                )
 
-            if matching_jobs:
-                
-                for job in matching_jobs:
-                    url = job.get("url") or job.get("application_url")
-
-                    if url:
-                        page_text = read_job_page(url)
-
-                        job["page_text"] = page_text
-                        
-                        if not job.get("company") and page_text:
-                            company_match = re.search(r'"hiringOrganization".*?"name"\s*:\s*"([^"]+)"', page_text, re.IGNORECASE)
-
-                            if company_match:
-                                job["company"] = company_match.group(1).strip()
-                            
-                all_jobs.extend(matching_jobs)
                 continue
 
             print(
-                f"[JARVIS] {source_name} returned jobs, "
-                f"but none matched {location}."
+                f" [JARVIS DEBUG] "
+                f"{source_name} returned "
+                f"{len(jobs)} jobs"
             )
 
+            for job in jobs:
+
+                if not isinstance(job, dict):
+                    continue
+
+                url = (
+                    job.get("url")
+                    or job.get("application_url")
+                    or ""
+                )
+
+                title = str(
+                    job.get("title", "")
+                ).strip()
+
+                # --------------------------------------------
+                # COMPANY FROM TITLE
+                # --------------------------------------------
+
+                if (
+                    not job.get("company")
+                    and title
+                ):
+
+                    job["company"] = (
+                        extract_company_from_title(
+                            title
+                        )
+                    )
+
+                # --------------------------------------------
+                # READ JOB PAGE
+                # --------------------------------------------
+
+                if url:
+
+                    page_text = read_job_page(
+                        url
+                    )
+
+                    if page_text:
+
+                        job["page_text"] = (
+                            page_text
+                        )
+
+                    # ----------------------------------------
+                    # COMPANY FROM PAGE
+                    # ----------------------------------------
+
+                    if (
+                        not job.get("company")
+                        and page_text
+                    ):
+
+                        company_match = re.search(
+                            r'"hiringOrganization"\s*:\s*'
+                            r'\{.*?"name"\s*:\s*"([^"]+)"',
+                            page_text,
+                            re.IGNORECASE | re.DOTALL
+                        )
+
+                        if company_match:
+
+                            job["company"] = (
+                                company_match
+                                .group(1)
+                                .strip()
+                            )
+
+                    # ----------------------------------------
+                    # COMPANY FROM KEKA URL
+                    # ----------------------------------------
+
+                    if not job.get("company"):
+
+                        keka_match = re.search(
+                            r"https?://([^.]+)\.keka\.com",
+                            url,
+                            re.IGNORECASE
+                        )
+
+                        if keka_match:
+
+                            job["company"] = (
+                                keka_match.group(1)
+                                .replace("-", " ")
+                                .replace("_", " ")
+                                .title()
+                            )
+
+                # --------------------------------------------
+                # FINAL COMPANY CLEANUP
+                # --------------------------------------------
+
+                if job.get("company"):
+
+                    job["company"] = re.sub(
+                        r"\s*\|\s*(careers?|jobs?|internships?)$",
+                        "",
+                        str(job["company"]),
+                        flags=re.IGNORECASE
+                    ).strip()
+
+                all_jobs.append(job)
+
         except Exception as e:
+
             error_text = str(e).lower()
 
-            if "insufficient_credits" in error_text or "402" in error_text:
-                print("⚠ Credits unavailable")
-            elif "auth_expired" in error_text or "authentication" in error_text:
-                print("⚠ Authentication unavailable")
+            print(
+                f"\n[JARVIS DEBUG] "
+                f"{source_name} failed:"
+            )
+
+            print(
+                f"[JARVIS DEBUG] {e}"
+            )
+
+            if (
+                "insufficient_credits"
+                in error_text
+                or "402"
+                in error_text
+            ):
+
+                print(
+                    "⚠ Credits unavailable"
+                )
+
+            elif (
+                "auth_expired"
+                in error_text
+                or "authentication"
+                in error_text
+            ):
+
+                print(
+                    "⚠ Authentication unavailable"
+                )
+
             else:
-                print("⚠ Source unavailable")
+
+                print(
+                    "⚠ Source unavailable"
+                )
+
             continue
+
+    # ========================================================
+    # REMOVE DUPLICATES
+    # ========================================================
 
     if all_jobs:
+
         unique_jobs = []
         seen_urls = set()
-        
+
         for job in all_jobs:
-            url = job.get("url") or job.get("application_url")
-            if url and url in seen_urls:
-                continue
+
+            url = (
+                job.get("url")
+                or job.get("application_url")
+                or ""
+            )
+
             if url:
+
+                if url in seen_urls:
+                    continue
+
                 seen_urls.add(url)
+
             unique_jobs.append(job)
-        return unique_jobs        
-            
+
+        return unique_jobs
+
     return []
-
-def get_demo_jobs(query, location):
-
-    return [
-        {
-            "title": "Python Developer Intern",
-            "company": "TechNova Solutions",
-            "location": "Mumbai, Maharashtra",
-            "salary": "₹15,000/month",
-            "snippet": (
-                "Python Developer Intern. "
-                "Skills: Python, Git, SQL, HTML, CSS. "
-                "Internship for computer engineering students."
-            ),
-            "job_type": "Internship",
-            "url": "DEMO-OFFLINE-JOB-1"
-        },
-        {
-            "title": "Software Development Intern",
-            "company": "Maitri Technologies",
-            "location": "Navi Mumbai, Maharashtra",
-            "salary": "₹12,000/month",
-            "snippet": (
-                "Software Development Internship. "
-                "Skills: Python, C++, Data Structures, Algorithms, Git. "
-                "Suitable for computer engineering students."
-            ),
-            "job_type": "Internship",
-            "url": "DEMO-OFFLINE-JOB-2"
-        },
-        {
-            "title": "Web Development Intern",
-            "company": "DigitalWorks",
-            "location": "Mumbai, Maharashtra",
-            "salary": "₹10,000/month",
-            "snippet": (
-                "Web Development Intern. "
-                "Skills: HTML, CSS, JavaScript, React, Git. "
-                "Students can apply."
-            ),
-            "job_type": "Internship",
-            "url": "DEMO-OFFLINE-JOB-3"
-        },
-        {
-            "title": "Backend Developer Intern",
-            "company": "CloudStack Technologies",
-            "location": "Thane, Maharashtra",
-            "salary": "₹14,000/month",
-            "snippet": (
-                "Backend Developer Intern. "
-                "Skills: Python, Flask, SQL, REST API, Git. "
-                "Computer engineering students preferred."
-            ),
-            "job_type": "Internship",
-            "url": "DEMO-OFFLINE-JOB-4"
-        },
-        {
-            "title": "Java Developer Intern",
-            "company": "CodeSphere",
-            "location": "Pune, Maharashtra",
-            "salary": "₹12,000/month",
-            "snippet": (
-                "Java Developer Internship. "
-                "Skills: Java, OOP, SQL, Git. "
-                "Software engineering students."
-            ),
-            "job_type": "Internship",
-            "url": "DEMO-OFFLINE-JOB-5"
-        }
-    ] 
-    
-def discover_web_actions():
-    print("[JARVIS] Searching for web-reading actions...")
-
-    queries = [
-        "read webpage",
-        "extract webpage content",
-        "web page content",
-        "scrape webpage"
-    ]
-    seen = set()    
-
-    for query in queries:
-        print(f"\n[JARVIS] Searching: {query}")
-
-        response = requests.get(
-            f"{BASE_URL}/v1/wire/search",
-            headers=get_headers(),
-            params={"query": query},
-            timeout=30
-        )
-
-        if response.status_code != 200:
-            print("ERROR:", response.text)
-            continue
-
-        results = response.json().get("results", [])
-
-        for action in results:
-            action_id = action.get("action_id")
-
-            if not action_id or action_id in seen:
-                continue
-
-            seen.add(action_id)
-
-            name = action.get("name", "")
-            description = action.get("description", "")
-
-            print("\n--------------------------------")
-            print("ACTION ID:", action_id)
-            print("NAME:", name)
-            print("DESCRIPTION:", description)
-            print("PARAMS:", action.get("params"))
-    
-    print("\n[JARVIS] Total unique actions:", len(seen))
-if __name__ == "__main__":
-    discover_web_actions()           

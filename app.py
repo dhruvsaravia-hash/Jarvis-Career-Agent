@@ -57,6 +57,14 @@ if st.button("🚀 Find Jobs"):
             jobs = result.get("jobs", [])
 
             if not jobs:
+                st.error(
+                    result.get(
+            "message",
+            "JARVIS could not complete the job search."
+                    )
+            )
+
+            elif not jobs:
                 st.warning("No suitable jobs found.")
             else:
 
@@ -66,44 +74,19 @@ if st.button("🚀 Find Jobs"):
 
                     score = job.get("score", 0)
 
-                    st.subheader(
-                        f"#{i} {job.get('title', 'Unknown title')}"
-                    )
-
-                    st.write(
-                        f"🏢 **Company:** {job.get('company', 'Unknown')}"
-                    )
-
-                    st.write(
-                        f"📍 **Location:** {job.get('location', 'Not specified')}"
-                    )
-
-                    st.write(
-                        f"⭐ **Match Score:** {score}%"
-                    )
-
-                    st.write(
-                        f"🎯 **Recommendation:** "
-                        f"{job.get('recommendation', 'REVIEW')}"
-                    )
+                    st.subheader(f"#{i} {job.get('title', 'Unknown title')}")
+                    st.write(f"🏢 **Company:** {job.get('company', 'Unknown')}")
+                    st.write(f"📍 **Location:** {job.get('location', 'Not specified')}")
+                    st.write(f"⭐ **Match Score:** {score}%")
+                    st.write(f"🎯 **Recommendation:** {job.get('recommendation', 'REVIEW')}")
 
                     if job.get("matched_skills"):
-                        st.write(
-                            "✅ **Matching skills:** "
-                            + ", ".join(job["matched_skills"][:5])
-                        )
+                        st.write("✅ **Matching skills:** " + ", ".join(job["matched_skills"][:5]))
 
                     if job.get("missing_skills"):
-                        st.write(
-                            "⚠️ **Skill gaps:** "
-                            + ", ".join(job["missing_skills"][:3])
-                        )
+                        st.write("⚠️ **Skill gaps:** " + ", ".join(job["missing_skills"][:3]))
 
-                    if job.get("url"):
-                        st.link_button(
-                            "🔗 Apply",
-                            job["url"]
-                        )
+                    if job.get("url"): st.link_button( "🔗 Apply", job["url"])
 
                     st.divider()
 

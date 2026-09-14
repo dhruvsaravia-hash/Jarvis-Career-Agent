@@ -162,6 +162,38 @@ class JarvisAgent:
         
         top_jobs = analyzed_jobs[:10]
         
+        if top_jobs:
+            best_job = top_jobs[0]
+
+            print("\n" + "-" * 60)
+            print("🤖 JARVIS DECISION ENGINE")
+            print("-" * 60)
+
+            print(
+                f"✓ Strongest opportunity: "
+                f"{best_job.get('title', 'Unknown')}"
+            )
+
+            print(
+                f"✓ Company: "
+                f"{best_job.get('company', 'Unknown company')}"
+            )
+
+            print(
+                f"✓ Match score: "
+                f"{best_job.get('score', 0)}%"
+            )
+
+            print(
+                f"✓ Confidence: "
+                f"{best_job.get('confidence', 'low').upper()}"
+            )
+
+            print(
+                f"✓ Recommendation: "
+                f"{best_job.get('recommendation', 'REVIEW')}"
+            )
+        
         return {
             "success": True,
             "query": query,

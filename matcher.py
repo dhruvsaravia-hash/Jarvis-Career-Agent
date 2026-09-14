@@ -57,29 +57,6 @@ def find_skills(text):
                 found.add(skill)
                 break
     return found
-
-def extract_required_skills(page_text):
-    text = normalize(page_text)
-
-    sections = [
-        "skills you'll use",
-        "technical skills",
-        "requirements",
-        "required skills",
-        "who can apply",
-        "qualifications",
-        "what we're looking for",
-    ]
-
-    relevant_text = ""
-
-    for section in sections:
-        index = text.find(section)
-
-        if index != -1:
-            relevant_text += text[index:index + 1500] + " "
-
-    return find_skills(relevant_text)
     
 def location_matches(job_location, preferred_location):
 
@@ -88,11 +65,32 @@ def location_matches(job_location, preferred_location):
 
     job_location = normalize(job_location)
     preferred_location = normalize(preferred_location)
-    
+
     if not preferred_location:
         return True
-    
-    if "mumbai" in preferred_location:
+
+    # Remote preference
+    if preferred_location in {
+        "remote",
+        "work from home",
+        "wfh"
+    }:
+        return any(
+            keyword in job_location
+            for keyword in [
+                "remote",
+                "work from home",
+                "wfh",
+                "anywhere"
+            ]
+        )
+
+    # Direct location match
+    if preferred_location in job_location:
+        return True
+
+    # Common Mumbai-region aliases
+    if preferred_location == "mumbai":
         mumbai_area = [
             "mumbai",
             "thane",
@@ -104,24 +102,28 @@ def location_matches(job_location, preferred_location):
             "bombay",
             "vasai",
             "virar",
-            "bhayandar",
-            "maharashtra",
-        ]    
-        
-        return any(place in job_location for place in mumbai_area)
-    
-    if "pune" in preferred_location:
-        pune_area=[
+            "bhayandar"
+        ]
+
+        return any(
+            place in job_location
+            for place in mumbai_area
+        )
+
+    # Common Pune-region aliases
+    if preferred_location == "pune":
+        pune_area = [
             "pune",
             "pimpri",
-            "chinchwad",
-            "maharashtra"
+            "chinchwad"
         ]
-        
-        return any(place in job_location for place in pune_area)
-    
-    return preferred_location in job_location   
 
+        return any(
+            place in job_location
+            for place in pune_area
+        )
+
+    return False
 def query_matches(job_text, query):
     ignored_words = {"internship", "intern", "job", "jobs", "role", "positions", "looking", "for"}
     
@@ -165,90 +167,157 @@ def extract_required_skills(page_text):
     return find_skills(relevant_text)
 
 def calculate_match(job, candidate, query="", preferred_location=""):
-    title=str(job.get("title",""))
-    snippet=str(job.get("snippet",""))
-    category =str(job.get("category",""))
-    employment_type=str(job.get("employment_type",""))
-    page_text=str(job.get("page_text", ""))
-    core_job_text=normalize(title + " " + snippet + " " + category + " " + employment_type)
-    
+    title = str(job.get("title", ""))
+    snippet = str(job.get("snippet", ""))
+    category = str(job.get("category", ""))
+    employment_type = str(job.get("employment_type", ""))
+    page_text = str(job.get("page_text", ""))
+
+    core_job_text = normalize(
+        title
+        + " "
+        + snippet
+        + " "
+        + category
+        + " "
+        + employment_type
+    )
+
     job_text = normalize(core_job_text + " " + page_text)
-    
+
     core_skills = find_skills(title)
-    
+
     required_skills = extract_required_skills(page_text)
+
     if not required_skills:
-        required_skills = find_skills(title + " " + snippet)
+        required_skills = find_skills(
+            title + " " + snippet
+        )
 
     job_skills = core_skills.union(required_skills)
-    
+
     candidate_skills = set(candidate["skills"])
-    
+
     matched = job_skills.intersection(candidate_skills)
     missing = job_skills - candidate_skills
-    
-    internship_text = normalize(title + " " + str(job.get("job_type", "")) + " " + str(job.get("employment_type", "")))
-    
+
+    internship_text = normalize(
+        title
+        + " "
+        + str(job.get("job_type", ""))
+        + " "
+        + str(job.get("employment_type", ""))
+    )
+
     if not job_skills:
-        skill_score=30
-    else:    
-        skill_score = round(len(matched)/len(job_skills)*100)   
-         
-    location_score = 100 if location_matches(job.get("location", ""), preferred_location) else 40
-    internship_score = 100 if "intern" in internship_text else 40
-    education_score = 100 if candidate.get("education") else 50
-    
-    role_match = query_matches(job_text, query)
+        skill_score = 30
+    else:
+        skill_score = round(
+            len(matched) / len(job_skills) * 100
+        )
+
+    location_score = (
+        100
+        if location_matches(
+            job.get("location", ""),
+            preferred_location
+        )
+        else 40
+    )
+
+    internship_score = (
+        100
+        if "intern" in internship_text
+        else 40
+    )
+
+    education_score = (
+        100
+        if candidate.get("education")
+        else 50
+    )
+
+    role_match = query_matches(
+        job_text,
+        query
+    )
+
     query_text = normalize(query)
-    
-    wants_internship = ("intern" in query_text or "internship" in query_text)
-    
-    internship_text = normalize(title + " " + str(job.get("job_type", "")) + " " + str(job.get("employment_type", "")))
-    
+
+    wants_internship = (
+        "intern" in query_text
+        or "internship" in query_text
+    )
+
     is_internship = "intern" in internship_text
-    
+
     if wants_internship:
         if is_internship:
             role_score = 100
             score_penalty = 0
         else:
-            role_score = 0  
+            role_score = 0
             score_penalty = 60
     else:
-        role_score = 100 if role_match else 0
-        score_penalty = 30 if not role_match else 0
-                
+        role_score = (
+            100
+            if role_match
+            else 0
+        )
+
+        score_penalty = (
+            30
+            if not role_match
+            else 0
+        )
+
     score = round(
-                  skill_score*0.60
-                  +role_score*0.15
-                  +location_score*0.10
-                  +internship_score*0.10
-                  +education_score*0.05
-                  -score_penalty
-                  )
+    skill_score * 0.50
+    + role_score * 0.20
+    + location_score * 0.10
+    + internship_score * 0.10
+    + education_score * 0.10
+    - score_penalty
+    )
     
-    if len(job_skills)<=1:
-        score=min(score, 74)
-        
+    if len(job_skills) <= 2:
+        score -= 10
+    elif len(job_skills) <= 4:
+        score -= 5
+
+    score = max(
+        0,
+        min(100, score)
+    )
+
     signals = (
         len(job_skills)
-        +int(query_matches(job_text, query))
-        +int("intern" in job_text)
-    )    
-    
-    confidence = "high" if signals>=3 else "medium" if signals else "low"
-    
-    if len(job_skills) <= 3:
-        score = min(score, 85)
-        
-    source_quality = job.get("source_quality", "unknown")
+        + int(query_matches(job_text, query))
+        + int("intern" in job_text)
+    )
+
+    confidence = (
+        "high"
+        if signals >= 3
+        else "medium"
+        if signals
+        else "low"
+    )
+
+    source_quality = job.get(
+        "source_quality",
+        "unknown"
+    )
 
     if (
         score >= 80
         and len(matched) >= len(missing)
         and role_match
         and len(job_skills) >= 5
-        and source_quality in ("verified", "unverified")
+        and source_quality in (
+            "verified",
+            "unverified"
+        )
     ):
         recommendation = "APPLY"
 
@@ -264,29 +333,74 @@ def calculate_match(job, candidate, query="", preferred_location=""):
 
     else:
         recommendation = "REVIEW"
-        
+
     strengths = sorted(matched)
-    strengths.append("hands-on-project")
-    strengths.append(candidate["education"])
-    
-    source = job.get("source", "Unknown source")
-    source_quality = job.get("source_quality", "unknown")
+
+    strengths.append(
+        "hands-on-project"
+    )
+
+    if candidate.get("education"):
+        strengths.append(
+            candidate["education"]
+        )
+
+    source = job.get(
+        "source",
+        "Unknown source"
+    )
+
+    source_quality = job.get(
+        "source_quality",
+        "unknown"
+    )
 
     return {
-        "title": title or "Unknown title",
-        "company": job.get("company") or "Unknown company",
-        "location": job.get("location") or "Not specified",
-        "salary": job.get("salary") or "Not specified",
-        "url": job.get("url") or "",
-        "source": source,
-        "source_quality": source_quality,        
-        "score": score,
-        "confidence": confidence,
-        "recommendation": recommendation,
-        "matched_skills": sorted(matched),
-        "missing_skills": sorted(missing),
-        "strengths": strengths,
-    }    
+    "title": title or "Unknown title",
+    "company": job.get("company") or "Unknown company",
+    "location": (
+        job.get("location")
+        or "Not specified"
+    ),
+    "salary": (
+        job.get("salary")
+        or "Not specified"
+    ),
+    "url": job.get("url") or "",
+    "source": source,
+    "source_quality": source_quality,
+
+    # Match results
+    "score": score,
+    "confidence": confidence,
+    "recommendation": recommendation,
+
+    # Skill evidence
+    "matched_skills": sorted(matched),
+    "missing_skills": sorted(missing),
+    "matched_skill_count": len(matched),
+    "required_skill_count": len(job_skills),
+    "skill_match_percentage": (
+        round(
+            len(matched) / len(job_skills) * 100
+        )
+        if job_skills
+        else 0
+    ),
+
+    # Decision evidence
+    "role_matched": role_match,
+    "location_matched": location_matches(
+        job.get("location", ""),
+        preferred_location
+    ),
+    "internship_confirmed": is_internship,
+    "education_detected": bool(
+        candidate.get("education")
+    ),
+
+    "strengths": strengths,
+}
     
 def build_candidate_from_resume(resume_text):
     skills=find_skills(resume_text)
