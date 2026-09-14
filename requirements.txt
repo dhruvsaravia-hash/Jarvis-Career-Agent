@@ -4,3 +4,4 @@ pdfplumber
 openai
 python-docx
 streamlit
+tavily-python
