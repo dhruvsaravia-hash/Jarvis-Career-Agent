@@ -199,5 +199,7 @@ class JarvisAgent:
             "query": query,
             "location": location,
             "total_jobs": len(jobs),
-            "jobs": top_jobs
+            "jobs": top_jobs,
+            "best_job": top_jobs[0] if top_jobs else None
         }    
+        
