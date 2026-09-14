@@ -85,7 +85,7 @@ This makes JARVIS more than a simple question-answering chatbot.
                        │
                        ▼
               ┌──────────────────┐
-              │ Recommendation   │
+              │ Recommendation       │
               └────────┬─────────┘
                        │
                        ▼
